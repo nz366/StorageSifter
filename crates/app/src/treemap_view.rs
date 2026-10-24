@@ -188,45 +188,41 @@ pub fn show(
         draw_cell(&ctx, id, *rect, nesting, &mut hovered);
     }
 
-    // Mark the top-level cell a click would drill into, with a tiled stipple
-    // (tinted by the accent so it reads on any palette). One textured quad — no
-    // per-pixel cost. Size and opacity are user-configurable.
-    if dither.strength > 0.01 {
-        if let Some(p) = response.hover_pos() {
-            if let Some(drill) = children
-                .iter()
-                .zip(&rects)
-                .map(|(_, r)| to_screen(*r))
-                .find(|r| r.contains(p))
-            {
-                let scale = dither.scale.max(2.0); // tile size in points
-                let uv = ERect::from_min_max(
-                    Pos2::ZERO,
-                    Pos2::new(drill.width() / scale, drill.height() / scale),
-                );
-                painter.image(
-                    dither.tex,
-                    drill,
-                    uv,
-                    pal.accent.gamma_multiply(dither.strength),
-                );
-            }
+ 
+    if let Some(hit) = hovered {
+        // Determine whether this node is "clickable": a dir with children or any file/special.
+        let node = tree.node(hit.id);
+        let clickable = (node.kind == NodeKind::Dir && !node.children.is_empty())
+            || (node.kind != NodeKind::Dir);
+        if clickable {
+            // Convert stored untransformed rect to the painted rect (respecting any xform).
+            let drawn = ctx.xform.apply(hit.rect);
+            // Draw a bright/thick accent border on top (tighter than the existing 1px border).
+            // Adjust stroke width and inset as you like; 2.0–3.0 looks good.
+            let stroke = Stroke::new(3.0_f32, ctx.pal.accent.gamma_multiply(1.0));
+            painter.rect_stroke(drawn, 0.0, stroke, StrokeKind::Inside);
         }
     }
 
     let modifiers = ui.input(|i| i.modifiers);
     let modified = modifiers.ctrl || modifiers.shift || modifiers.mac_cmd;
 
-    // Left click targets the top-level child it landed in (one level per click).
+    // Left click: prefer the innermost cell recorded in `hovered` (so nested
+    // preview boxes are clickable). Fall back to the top-level child test if
+    // nothing was recorded.
     let clicked = if response.clicked() {
-        response.interact_pointer_pos().and_then(|p| {
-            children
-                .iter()
-                .zip(&rects)
-                .map(|(&id, r)| (id, to_screen(*r)))
-                .find(|(_, r)| r.contains(p))
-                .map(|(id, rect)| Hit { id, rect })
-        })
+        if let Some(hit) = hovered {
+            Some(hit)
+        } else {
+            response.interact_pointer_pos().and_then(|p| {
+                children
+                    .iter()
+                    .zip(&rects)
+                    .map(|(&id, r)| (id, to_screen(*r)))
+                    .find(|(_, r)| r.contains(p))
+                    .map(|(id, rect)| Hit { id, rect })
+            })
+        }
     } else {
         None
     };
